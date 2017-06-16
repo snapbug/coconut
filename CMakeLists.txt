@@ -8,9 +8,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 project(coconut)
 
-if(CMAKE_BUILD_TYPE MATCHES Rel)
-  add_definitions(-mavx -march=native)
-endif()
+# Allow avx instructions, and target native architecture
+add_definitions(-mavx -march=native)
 
 # findpackage(blaze) does not work
 include("${CMAKE_CURRENT_LIST_DIR}/external/blaze/build/cmake/blaze-targets.cmake")
