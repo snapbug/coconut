@@ -1,0 +1,16 @@
+{
+  "type": "record",
+  "name": "weights",
+  "namespace": "CNN",
+  "fields": [
+    {"name" : "dimension", "type":
+    {
+      "type": "array",
+      "items": "int"
+    }},
+    {"name" : "weights", "type": {
+      "type": "array",
+      "items": "double"
+    }}
+   ]
+}
