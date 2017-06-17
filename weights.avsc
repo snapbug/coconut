@@ -1,7 +1,7 @@
 {
   "type": "record",
-  "name": "weights",
-  "namespace": "CNN",
+  "name": "cnnweights",
+  "namespace": "coconut",
   "fields": [
     {"name" : "dimension", "type":
     {

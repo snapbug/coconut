@@ -17,8 +17,8 @@
  */
 
 
-#ifndef WEIGHTS_HH_2948047845__H_
-#define WEIGHTS_HH_2948047845__H_
+#ifndef NNWEIGHTS_HXX_2880584948__H_
+#define NNWEIGHTS_HXX_2880584948__H_
 
 
 #include <sstream>
@@ -27,11 +27,11 @@
 #include "avro/Encoder.hh"
 #include "avro/Decoder.hh"
 
-namespace donk {
-struct nnweights {
+namespace coconut {
+struct cnnweights {
     std::vector<int32_t > dimension;
     std::vector<double > weights;
-    nnweights() :
+    cnnweights() :
         dimension(std::vector<int32_t >()),
         weights(std::vector<double >())
         { }
@@ -39,12 +39,12 @@ struct nnweights {
 
 }
 namespace avro {
-template<> struct codec_traits<donk::nnweights> {
-    static void encode(Encoder& e, const donk::nnweights& v) {
+template<> struct codec_traits<coconut::cnnweights> {
+    static void encode(Encoder& e, const coconut::cnnweights& v) {
         avro::encode(e, v.dimension);
         avro::encode(e, v.weights);
     }
-    static void decode(Decoder& d, donk::nnweights& v) {
+    static void decode(Decoder& d, coconut::cnnweights& v) {
         if (avro::ResolvingDecoder *rd =
             dynamic_cast<avro::ResolvingDecoder *>(&d)) {
             const std::vector<size_t> fo = rd->fieldOrder();

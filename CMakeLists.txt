@@ -24,15 +24,6 @@ add_custom_command(
   COMMAND cmake -E echo
   )
 
-add_executable(donk
-  EXCLUDE_FROM_ALL
-  always_rebuild
-  test.cpp
-  )
-target_link_libraries(donk
-  blaze::blaze
-  )
-
 #
 # Make the generator program
 #
@@ -49,7 +40,7 @@ target_link_libraries(coconut-gen
 #
 add_custom_command(
   OUTPUT coconut.cpp
-  COMMAND coconut-gen
+  COMMAND coconut-gen "${CMAKE_CURRENT_LIST_DIR}/weights.avro" "${CMAKE_CURRENT_LIST_DIR}/ext_1.csv"
   always_rebuild
   )
 add_executable(coconut
