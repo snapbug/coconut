@@ -75,7 +75,7 @@ auto loadWord2Vec(const char *fname) {
   return w2vmap;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
 )";
 
 	std::vector<std::string> names{"question_convolution_filters", "question_convolution_biases",
@@ -167,13 +167,14 @@ int main(void) {
 		coconut << "{" << dist(gen) << "},";
 	coconut << "};\n";
 
-    coconut << "auto w2v_map = loadWord2Vec(\"../aquaint+wiki.txt.gz.ndim=50.bin\");\n";
-    coconut << "while (std::cin) {\n";
+    coconut << "auto w2v_map = loadWord2Vec(argv[1]);\n";
+    coconut << "auto inp = std::ifstream(argv[2]);\n";
+    coconut << "while (inp) {\n";
 
 	for (auto part : {"question", "answer"}) {
 		/* Load the query terms into a vector */
 		coconut << "std::string " << part << "_line;\n";
-		coconut << "getline(std::cin, " << part << "_line);\n";
+		coconut << "getline(inp, " << part << "_line);\n";
 		coconut << "std::stringstream " << part << "_ss(" << part << "_line);\n";
 		coconut << "std::vector<std::string> " << part << "_words{std::istream_iterator<std::string>{" << part << "_ss}, std::istream_iterator<std::string>{}};\n";
         coconut << "if (" << part << "_words.size() == 0) { break; }\n";
@@ -241,9 +242,7 @@ auto sumexpsubmax = expsubmax[0] + expsubmax[1];
 auto end = std::chrono::steady_clock::now();
 std::chrono::duration<double, std::milli> time = end - start;
 
-/* std::cout << time.count() << "\n"; */
-/* std::cout << "Final values: " << submax[0] - log(sumexpsubmax) << ", " << submax[1] - log(sumexpsubmax) << std::endl; */
-std::cout << submax[0] - log(sumexpsubmax) << " " << submax[1] - log(sumexpsubmax) << " " << time.count() << "\n";
+std::cout << "Final values: " << submax[0] - log(sumexpsubmax) << ", " << submax[1] - log(sumexpsubmax) << " in " << time.count() << "ms\n";
 }
 
 }
