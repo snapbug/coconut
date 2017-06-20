@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <random>
 #include <tuple>
 
 std::vector<std::vector<double>> readCSV(const char *fname) {
@@ -77,16 +78,10 @@ auto loadWord2Vec(const char *fname) {
 int main(void) {
 )";
 
-	std::vector<std::string> names{
-      "question_convolution_filters",
-      "question_convolution_biases",
-      "answer_convolution_filters",
-      "answer_convolution_biases",
-      "hidden_layer_weights",
-      "hidden_layer_biases",
-      "softmax_layer_weights",
-      "softmax_layer_biases"
-	};
+	std::vector<std::string> names{"question_convolution_filters", "question_convolution_biases",
+	                               "answer_convolution_filters",   "answer_convolution_biases",
+	                               "hidden_layer_weights",         "hidden_layer_biases",
+	                               "softmax_layer_weights",        "softmax_layer_biases"};
 
 	avro::DataFileReader<coconut::cnnweights> dfr(argv[1]);
 	coconut::cnnweights weight;
@@ -100,11 +95,14 @@ int main(void) {
 			std::cerr << "Cannot handle > 3 dimensions!\n" << std::endl;
 			continue;
 		case 3:
-			coconut << "std::vector<" << "StaticMatrix<double, " << weight.dimension[1] << ", " << weight.dimension[2] << ">> " << name << ";\n";
+			coconut << "std::vector<"
+			        << "StaticMatrix<double, " << weight.dimension[1] << ", " << weight.dimension[2]
+			        << ">> " << name << ";\n";
 			coconut << name << ".reserve(" << weight.dimension[0] << ");\n";
 			sz = weight.dimension[1] * weight.dimension[2];
 			for (int n = 0; n < weight.dimension[0]; n++) {
-				coconut << name << ".push_back(StaticMatrix<double, " << weight.dimension[1] << ", " << weight.dimension[2] << ">{";
+				coconut << name << ".push_back(StaticMatrix<double, " << weight.dimension[1] << ", "
+				        << weight.dimension[2] << ">{";
 				auto start = n * sz;
 				auto end = (n + 1) * sz;
 				coconut << "{";
@@ -144,22 +142,30 @@ int main(void) {
 	 */
 	coconut << "transpose(hidden_layer_weights);\n";
 
+	auto external = readCSV(argv[2]);
+	coconut << "StaticVector<double," << external.size() << "> external{\n";
+	for (auto feat : external)
+		coconut << feat[0] << ",";
+	coconut << "\n};\n";
+
 	/*
 	 * Generate a "random" vector for unknown words -- while this _should_ be random I'm too dumb to
 	 * work out how to use the same random number generator as numpy, so I borrowed this from the
 	 * output of the weights for an example question...
 	 */
-	coconut << R"(
-StaticMatrix<float, EMBED_DIMENSION, 1> unknown_question_word{{0.120687},{-0.0994655},{-0.0388413},{0.340653},{-0.047662},{-0.585873},{0.302925},{0.493592},{0.034791},{-0.165766},{0.395165},{0.135953},{-0.443345},{-0.274928},{0.355806},{0.614136},{-0.267557},{-0.0167247},{0.41984},{-0.237471},{0.742444},{-0.314932},{0.0132752},{-0.36691},{-0.265743},{-0.524515},{0.122545},{-0.256592},{0.176823},{-0.402641},{-0.265591},{-0.206455},{-0.285454},{0.276018},{0.474488},{0.28826},{-0.0081898},{0.0514516},{0.0654361},{0.21053},{-0.20768},{-0.0979844},{0.0758915},{0.348158},{0.635769},{0.258099},{-0.119316},{0.92223},{0.0483396},{-0.123451}};
-StaticMatrix<float, EMBED_DIMENSION, 1> unknown_answer_word{{-0.15424},{0.0610544},{-0.0311361},{0.142679},{0.139988},{-0.113704},{-0.111768},{0.150936},{0.22907},{0.187966},{-0.0710914},{0.000497563},{0.0917315},{0.106351},{-0.0648746},{0.0305981},{0.00154158},{-0.243116},{0.136413},{0.191321},{-0.067557},{0.0576981},{-0.212309},{-0.065588},{0.21657},{0.0756891},{-0.0513987},{0.144365},{-0.0915819},{0.0340493},{0.184564},{-0.0319133},{0.151074},{-0.178117},{0.10213},{0.102291},{-0.140604},{0.212434},{-0.0289296},{0.204658},{-0.220095},{-0.157856},{-0.226322},{0.0874405},{0.0473124},{0.0166551},{-0.228338},{0.0307165},{-0.0851658},{0.00148342}};
-)";
+	std::random_device r;
+	std::mt19937 gen(r());
+	gen.seed(1234);
+	std::uniform_real_distribution<float> dist(-.25, .25);
 
-	auto external = readCSV(argv[2]);
-	coconut << "StaticVector<double," << external.size() << "> external{\n";
-    for (auto feat : external) {
-		coconut << feat[0] << ",";
-	}
-	coconut << "\n};\n";
+	/*
+     * This _should_ get the same unknown_word vector as the pytorch
+     * version, but that's been a bit finnicky in the past, no gaurantees.
+	 */
+	coconut << "StaticMatrix<float, EMBED_DIMENSION, 1> unknown_word{";
+	for (int i = 0; i < 50; i++)
+		coconut << "{" << dist(gen) << "},";
+	coconut << "};\n";
 
 	coconut << R"(
 auto w2v_map = loadWord2Vec("../aquaint+wiki.txt.gz.ndim=50.bin");
@@ -170,19 +176,15 @@ auto convolve = [](auto input, auto filter) {
     auto sub = submatrix(input, 0, i, filter.rows(), filter.columns());
     auto cc = sub % filter;
     double sum = 0;
-    for (int j = 0; j < cc.rows(); j++) {
-      for (auto it = cc.begin(j); it != cc.end(j); ++it) {
-        sum += *it;
-      }
-    }
+    for (int j = 0; j < cc.rows(); j++)
+      sum += std::accumulate(cc.begin(j), cc.end(j), 0.0);
     result[i] = sum;
   }
   result.resize(input.columns());
   return result;
 };
 
-auto start = std::chrono::steady_clock::now();
-
+while (std::cin) {
 )";
 
 	for (auto part : {"question", "answer"}) {
@@ -191,19 +193,25 @@ auto start = std::chrono::steady_clock::now();
 		coconut << "getline(std::cin, " << part << "_line);\n";
 		coconut << "std::stringstream " << part << "_ss(" << part << "_line);\n";
 		coconut << "std::vector<std::string> " << part << "_words{std::istream_iterator<std::string>{" << part << "_ss}, std::istream_iterator<std::string>{}};\n";
+	}
+
+	coconut << "auto start = std::chrono::steady_clock::now();\n";
+
+	for (auto part : {"question", "answer"}) {
 		coconut << "\n";
-        /* Create a matrix that's big enough for the query and padding */
+		/* Create a matrix that's big enough for the query and padding */
 		coconut << "HybridMatrix<float, EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2> " << part << "(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
-        /* Set the relevant columns in the matrix to be the word2vec values, or if we can't find it, a random vector */
+		/* Set the relevant columns in the matrix to be the word2vec values, or if we can't find it,
+		 * a random vector */
 		coconut << "for (int i = 0; i < " << part << "_words.size(); i++) {\n";
 		coconut << "  auto w2v_p = w2v_map.find(" << part << "_words[i]);\n";
-		coconut << "  auto w2v = w2v_p == w2v_map.end() ? unknown_" << part << "_word : w2v_p->second;\n";
+		coconut << "  auto w2v = w2v_p == w2v_map.end() ? unknown_word : w2v_p->second;\n";
 		coconut << "  submatrix(" << part << ", 0, i + COLUMN_PADDING, EMBED_DIMENSION, 1) = w2v;\n";
 		coconut << "}\n";
-        /* Reshape it to match the number of terms given */
+		/* Reshape it to match the number of terms given */
 		coconut << "" << part << ".resize(EMBED_DIMENSION, " << part << "_words.size() + 2 * COLUMN_PADDING);\n";
-        coconut << "\n";
-        /* Perform the convolutions */
+		coconut << "\n";
+		/* Perform the convolutions */
 		coconut << "StaticVector<double, " << part << "_convolution_biases.size()> " << part << "_conv_map;\n";
 		coconut << "for (int i = 0; i < " << part << "_convolution_filters.size(); i++) {\n";
 		coconut << "  " << part << "_conv_map[i] = max(convolve(" << part << ", " << part << "_convolution_filters[i]));\n";
@@ -227,11 +235,13 @@ auto sumexpsubmax = expsubmax[0] + expsubmax[1];
 
 auto end = std::chrono::steady_clock::now();
 std::chrono::duration<double, std::milli> time = end - start;
-std::cout << "Prepping matrices + forward: " << time.count() << "ms\n";
 
+std::cout << "Prepping matrices + forward: " << time.count() << "ms\n";
 std::cout << "Final values: " << submax[0] - log(sumexpsubmax) << ", " << submax[1] - log(sumexpsubmax) << std::endl;
+}
+
 }
 )";
 
-    return EXIT_SUCCESS;
+	return EXIT_SUCCESS;
 }
