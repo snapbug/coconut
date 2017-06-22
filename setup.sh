@@ -14,7 +14,9 @@ cd ../../..
 # Generate the thrift files
 thrift -r --gen cpp qa.thrift
 mkdir build
-ln -s gen-cpp build/gen-cpp
+cd build
+ln -s ../gen-cpp .
+cd ..
 
 # Generate the header file
 avrogencpp -i weights.avsc -o nnweights.hxx -n coconut
