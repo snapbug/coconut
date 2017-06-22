@@ -9,7 +9,11 @@ cd external/blaze
 mkdir build
 cd build
 cmake .. -DBLAZE_SMP_THREADS=C++11
-cd ../../..
+cd ../..
+
+# Generate the thrift files
+thrift -r --gen cpp ../qa.thrift
+cd ..
 
 # Generate the header file
 avrogencpp -i weights.avsc -o nnweights.hxx -n coconut

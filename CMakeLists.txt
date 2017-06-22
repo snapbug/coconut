@@ -45,7 +45,8 @@ add_custom_command(
   )
 add_custom_command(
   OUTPUT gen-cpp/QuestionAnswering.h
-  COMMAND thrift -r --gen cpp /Users/m4crane/compiled-nn/Anserini/src/main/thrift/qa.thrift
+  COMMAND thrift -r --gen cpp ../qa.thrift
+  always_rebuild
   )
 
 add_executable(coconut-server
