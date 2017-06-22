@@ -25,20 +25,31 @@ std::vector<std::vector<double>> readCSV(const char *fname) {
 }
 
 int main(int argc, char **argv) {
-	std::ofstream coconut("coconut.cpp");
+	std::ofstream coconut("coconut-server.cpp");
+
 	coconut << R"(
 #include "blaze/Math.h"
+#include "gen-cpp/QuestionAnswering.h"
+#include <array>
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <thrift/protocol/TBinaryProtocol.h>
+#include <thrift/server/TSimpleServer.h>
+#include <thrift/transport/TBufferTransports.h>
+#include <thrift/transport/TServerSocket.h>
 #include <unordered_map>
 #include <vector>
+
+using namespace blaze;
+using namespace ::apache::thrift;
+using namespace ::apache::thrift::protocol;
+using namespace ::apache::thrift::transport;
+using namespace ::apache::thrift::server;
 
 static constexpr unsigned long COLUMN_PADDING = 4;
 static constexpr unsigned long MAX_SENTENCE_LENGTH = 60;
 static constexpr unsigned long EMBED_DIMENSION = 50;
-
-using namespace blaze;
 
 auto loadWord2Vec(const char *fname) {
   using ValueType = StaticMatrix<float, EMBED_DIMENSION, 1>;
@@ -75,7 +86,8 @@ auto loadWord2Vec(const char *fname) {
   return w2vmap;
 }
 
-int main(int argc, char **argv) {
+class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
+  public:
 )";
 
 	std::vector<std::string> names{"question_convolution_filters", "question_convolution_biases",
@@ -91,17 +103,13 @@ int main(int argc, char **argv) {
 		double sz;
 
 		switch (weight.dimension.size()) {
-		default:
-			std::cerr << "Cannot handle > 3 dimensions!\n" << std::endl;
-			continue;
 		case 3:
-			coconut << "std::vector<"
-			        << "StaticMatrix<float, " << weight.dimension[1] << ", " << weight.dimension[2]
-			        << ">> " << name << ";\n";
-			coconut << name << ".reserve(" << weight.dimension[0] << ");\n";
+			std::cerr << name << " has size " << weight.dimension[0] << std::endl;
+			coconut << "std::array<StaticMatrix<float, " << weight.dimension[1] << ", "
+			        << weight.dimension[2] << ">, " << weight.dimension[0] << "> " << name << "{\n";
 			sz = weight.dimension[1] * weight.dimension[2];
 			for (int n = 0; n < weight.dimension[0]; n++) {
-				coconut << name << ".push_back(StaticMatrix<float, " << weight.dimension[1] << ", "
+				coconut << "StaticMatrix<float, " << weight.dimension[1] << ", "
 				        << weight.dimension[2] << ">{";
 				auto start = n * sz;
 				auto end = (n + 1) * sz;
@@ -111,11 +119,13 @@ int main(int argc, char **argv) {
 						coconut << "}, {";
 					coconut << weight.weights[w] << ", ";
 				}
-				coconut << "}});\n";
+				coconut << "}},\n";
 			}
+			coconut << "};\n";
 			break;
 		case 2:
-			coconut << "StaticMatrix<float, " << weight.dimension[0] << ", " << weight.dimension[1] << "> " << name << "{";
+			coconut << "StaticMatrix<float, " << weight.dimension[0] << ", " << weight.dimension[1]
+			        << "> " << name << "{";
 			sz = weight.dimension[1];
 			for (int x = 0; x < weight.dimension[0]; x++) {
 				auto start = x * sz;
@@ -128,7 +138,8 @@ int main(int argc, char **argv) {
 			coconut << "};\n";
 			break;
 		case 1:
-			coconut << "StaticVector<float, " << weight.dimension[0] << ", rowVector> " << name << "{";
+			coconut << "StaticVector<float, " << weight.dimension[0] << ", rowVector> " << name
+			        << "{";
 			for (auto w : weight.weights)
 				coconut << w << ", ";
 			coconut << "};\n";
@@ -136,115 +147,118 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	/*
-	 * The hidden layer weights were exported transposed, so transpose them to get
-	 * the right ones
-	 */
-	coconut << "transpose(hidden_layer_weights);\n";
-
-	auto external = readCSV(argv[2]);
-	coconut << "StaticVector<float," << external.size() << ", rowVector> external{\n";
-	for (auto feat : external)
-		coconut << feat[0] << ",";
-	coconut << "\n};\n";
-
-	/*
-	 * Generate a "random" vector for unknown words -- while this _should_ be random I'm too dumb to
-	 * work out how to use the same random number generator as numpy, so I borrowed this from the
-	 * output of the weights for an example question...
-	 */
 	std::random_device r;
 	std::mt19937 gen(r());
 	gen.seed(1234);
 	std::uniform_real_distribution<float> dist(-.25, .25);
-
-	/*
-     * This _should_ get the same unknown_word vector as the pytorch
-     * version, but that's been a bit finnicky in the past, no gaurantees.
-	 */
 	coconut << "StaticMatrix<float, EMBED_DIMENSION, 1> unknown_word{";
 	for (int i = 0; i < 50; i++)
 		coconut << "{" << dist(gen) << "},";
 	coconut << "};\n";
 
-    coconut << "auto w2v_map = loadWord2Vec(argv[1]);\n";
-    coconut << "auto inp = std::ifstream(argv[2]);\n";
-    coconut << "while (inp) {\n";
+	for (auto part : {"question", "answer"}) {
+		/* Get vectors for the results from the convolutions */
+		coconut << "StaticVector<float, 100, rowVector> " << part << "_conv_map;\n";
+		/* Create a matrix that's big enough for the query and padding */
+		coconut << "HybridMatrix<float, EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2> "
+		        << part << "_input{EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2};\n";
+	}
+	/* To store the convolution result */
+	coconut << "HybridVector<float, MAX_SENTENCE_LENGTH, rowVector> "
+	           "conv_result{MAX_SENTENCE_LENGTH};\n";
+
+	coconut << R"(
+    decltype(loadWord2Vec("")) w2v_map;
+
+	QuestionAnsweringHandler(const char *w2v) {
+		transpose(this->hidden_layer_weights);
+        /* Left pad */
+        submatrix(this->question_input, 0, 0, EMBED_DIMENSION, COLUMN_PADDING) = 0;
+        submatrix(this->answer_input, 0, 0, EMBED_DIMENSION, COLUMN_PADDING) = 0;
+        this->w2v_map = loadWord2Vec(w2v);
+	}
+
+	double getScore(const std::string &question, const std::string &answer) {
+        std::cout << "Question: '" << question << "'\n";
+        std::cout << "Answer: '" << answer << "'\n";
+
+        auto start = std::chrono::steady_clock::now();
+)";
 
 	for (auto part : {"question", "answer"}) {
 		/* Load the query terms into a vector */
-		coconut << "std::string " << part << "_line;\n";
-		coconut << "getline(inp, " << part << "_line);\n";
-		coconut << "std::stringstream " << part << "_ss(" << part << "_line);\n";
+		coconut << "std::stringstream " << part << "_ss{" << part << "};\n";
 		coconut << "std::vector<std::string> " << part << "_words{std::istream_iterator<std::string>{" << part << "_ss}, std::istream_iterator<std::string>{}};\n";
-        coconut << "if (" << part << "_words.size() == 0) { break; }\n";
-        /* Get vectors for the results from the convolutions */
-		coconut << "StaticVector<float, " << part << "_convolution_biases.size(), rowVector> " << part << "_conv_map;\n";
-        /* Create a matrix that's big enough for the query and padding */
-        coconut << "HybridMatrix<float, EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2> " << part << "_input(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
-        /* Left pad */
-        coconut << "submatrix(" << part << "_input, 0, 0, EMBED_DIMENSION, COLUMN_PADDING) = 0;\n";
+        coconut << "if (" << part << "_words.size() == 0) { return -1; }\n";
 	}
-    /* To store the convolution result */
-    coconut << "HybridVector<float, MAX_SENTENCE_LENGTH, rowVector> conv_result(MAX_SENTENCE_LENGTH);\n";
 
-	coconut << "auto start = std::chrono::steady_clock::now();\n";
-
-    /* Prepare the input matrices for forwarding */
+	/* Prepare the input matrices for forwarding */
 	for (auto part : {"question", "answer"}) {
 		coconut << "\n";
-        coconut << part << "_input.resize(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
-		/* Set the relevant columns in the matrix to be the word2vec values, or if we can't find it, a random vector */
+		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
+		/* Set the relevant columns in the matrix to be the word2vec values, or if we can't find it,
+		 * a random vector */
 		coconut << "for (int i = 0; i < " << part << "_words.size(); i++) {\n";
-		coconut << "  auto w2v_p = w2v_map.find(" << part << "_words[i]);\n";
-		coconut << "  auto w2v = w2v_p == w2v_map.end() ? unknown_word : w2v_p->second;\n";
+		coconut << "  auto w2v_p = this->w2v_map.find(" << part << "_words[i]);\n";
+		coconut << "  auto w2v = w2v_p == this->w2v_map.end() ? this->unknown_word : w2v_p->second;\n";
 		coconut << "  submatrix(" << part << "_input, 0, i + COLUMN_PADDING, EMBED_DIMENSION, 1) = w2v;\n";
 		coconut << "}\n";
-        /* Right pad */
-        coconut << "submatrix(" << part << "_input, 0, " << part << "_words.size() + COLUMN_PADDING, EMBED_DIMENSION, COLUMN_PADDING) = 0;\n";
+		/* Right pad */
+		coconut << "submatrix(this->" << part << "_input, 0, " << part << "_words.size() + COLUMN_PADDING, EMBED_DIMENSION, COLUMN_PADDING) = 0;\n";
 		/* Reshape it to match the number of terms given */
-		coconut << "" << part << "_input.resize(EMBED_DIMENSION, " << part << "_words.size() + 2 * COLUMN_PADDING);\n";
-    }
-
-    /* Start the forwarding */
-	for (auto part : {"question", "answer"}) {
-		/* Perform the convolutions */
-        coconut << "conv_result.resize(" << part << "_input.columns());\n";
-		coconut << "for (int i = 0; i < " << part << "_convolution_filters.size(); i++) {\n";
-        coconut << "  for (int k = 0; k < " << part << "_input.columns() - COLUMN_PADDING; k++) {\n";
-        coconut << "    auto sub = submatrix(" << part << "_input, 0, k, " << part << "_convolution_filters[i].rows(), " << part << "_convolution_filters[i].columns());\n";
-        coconut << "    auto cc = sub % " << part << "_convolution_filters[i];\n";
-        coconut << "    float sum = 0.0;\n";
-        coconut << "    for (int j = 0; j < cc.rows(); j++) {\n";
-        coconut << "      sum += std::accumulate(cc.begin(j), cc.end(j), 0.0);\n";
-        coconut << "    }\n";
-        coconut << "  conv_result[k] = sum;\n";
-        coconut << "  }\n";
-        coconut << "  " << part << "_conv_map[i] = max(conv_result);\n";
-		coconut << "}\n";
-		coconut << part << "_conv_map = tanh(" << part << "_conv_map + " << part << "_convolution_biases);\n";
+		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, " << part << "_words.size() + 2 * COLUMN_PADDING);\n";
 	}
 
+	/* Start the forwarding */
+	for (auto part : {"question", "answer"}) {
+		/* Perform the convolutions */
+		coconut << "this->conv_result.resize(" << part << "_words.size());\n";
+		coconut << "for (int i = 0; i < this->" << part << "_convolution_filters.size(); i++) {\n";
+		coconut << "  for (int k = 0; k < " << part << "_words.size(); k++) {\n";
+		coconut << "    auto sub = submatrix(this->" << part << "_input, 0, k + COLUMN_PADDING, this->" << part << "_convolution_filters[i].rows(), this->" << part << "_convolution_filters[i].columns());\n";
+		coconut << "    auto cc = sub % this->" << part << "_convolution_filters[i];\n";
+		coconut << "    float sum = 0.0;\n";
+		coconut << "    for (int j = 0; j < cc.rows(); j++) {\n";
+		coconut << "      sum += std::accumulate(cc.begin(j), cc.end(j), 0.0);\n";
+		coconut << "    }\n";
+		coconut << "  this->conv_result[k] = sum;\n";
+		coconut << "  }\n";
+		coconut << "  this->" << part << "_conv_map[i] = max(this->conv_result);\n";
+		coconut << "}\n";
+		coconut << "this->" << part << "_conv_map = tanh(this->" << part << "_conv_map + this->" << part << "_convolution_biases);\n";
+	}
 	coconut << R"(
-StaticVector<float, question_convolution_biases.size() + answer_convolution_biases.size() + external.size(), rowVector> joinLayer;
-subvector(joinLayer, 0, question_conv_map.size()) = question_conv_map;
-subvector(joinLayer, question_conv_map.size(), answer_conv_map.size()) = answer_conv_map;
-subvector(joinLayer, question_conv_map.size() + answer_conv_map.size(), external.size()) = external;
+        StaticVector<float, 204, rowVector> joinLayer{0};
+        subvector(joinLayer, 0, this->question_conv_map.size()) = this->question_conv_map;
+        subvector(joinLayer, this->question_conv_map.size(), this->answer_conv_map.size()) = this->answer_conv_map;
 
-auto HiddenLayer = tanh((joinLayer * hidden_layer_weights) + hidden_layer_biases) * 2;
-auto FinalLayer = (HiddenLayer * trans(softmax_layer_weights)) + softmax_layer_biases;
+        auto HiddenLayer = tanh((joinLayer * this->hidden_layer_weights) + this->hidden_layer_biases) * 2;
+        auto FinalLayer = (HiddenLayer * trans(softmax_layer_weights)) + this->softmax_layer_biases;
 
-StaticVector<float, 2, rowVector> fmax(max(FinalLayer));
-auto submax = FinalLayer - fmax;
-auto expsubmax = exp(submax);
-auto sumexpsubmax = expsubmax[0] + expsubmax[1];
+        StaticVector<float, 2, rowVector> fmax(max(FinalLayer));
+        auto submax = FinalLayer - fmax;
+        auto expsubmax = exp(submax);
+        auto sumexpsubmax = expsubmax[0] + expsubmax[1];
 
-auto end = std::chrono::steady_clock::now();
-std::chrono::duration<double, std::milli> time = end - start;
+        auto end = std::chrono::steady_clock::now();
+        std::chrono::duration<double, std::milli> time = end - start;
 
-std::cout << "Final values: " << submax[0] - log(sumexpsubmax) << ", " << submax[1] - log(sumexpsubmax) << " in " << time.count() << "ms\n";
-}
+        std::cout << "Time: " << time.count() << "ms\n";
+        return submax[1] - log(sumexpsubmax);
+	}
+};
 
+int main(int argc, char **argv) {
+  int port = 9090;
+  boost::shared_ptr<QuestionAnsweringHandler> handler(new QuestionAnsweringHandler(argv[1]));
+  boost::shared_ptr<TProcessor> processor(new QuestionAnsweringProcessor(handler));
+  boost::shared_ptr<TServerTransport> serverTransport(new TServerSocket(port));
+  boost::shared_ptr<TTransportFactory> transportFactory(new TBufferedTransportFactory());
+  boost::shared_ptr<TProtocolFactory> protocolFactory(new TBinaryProtocolFactory());
+
+  TSimpleServer server(processor, serverTransport, transportFactory, protocolFactory);
+  std::cerr << "Serving!" << std::endl;
+  server.serve();
 }
 )";
 

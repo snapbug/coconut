@@ -39,13 +39,34 @@ target_link_libraries(coconut-gen
 # Use the generator to make the main, and make that
 #
 add_custom_command(
-  OUTPUT coconut.cpp
-  COMMAND coconut-gen "${CMAKE_CURRENT_LIST_DIR}/weights.avro" "${CMAKE_CURRENT_LIST_DIR}/ext_1.csv"
+  OUTPUT coconut-server.cpp
+  COMMAND coconut-gen "${CMAKE_CURRENT_LIST_DIR}/weights.avro"
   always_rebuild
   )
-add_executable(coconut
-  coconut.cpp
+add_custom_command(
+  OUTPUT gen-cpp/QuestionAnswering.h
+  COMMAND thrift -r --gen cpp /Users/m4crane/compiled-nn/Anserini/src/main/thrift/qa.thrift
   )
-target_link_libraries(coconut
+
+add_executable(coconut-server
+  coconut-server.cpp
+  gen-cpp/QuestionAnswering.h
+  gen-cpp/QuestionAnswering.cpp
+  gen-cpp/qa_constants.cpp
+  gen-cpp/qa_types.cpp
+  )
+target_link_libraries(coconut-server
   blaze::blaze
+  thrift
 )
+
+add_executable(coconut-client
+  coconut-client.cpp
+  gen-cpp/QuestionAnswering.h
+  gen-cpp/QuestionAnswering.cpp
+  gen-cpp/qa_constants.cpp
+  gen-cpp/qa_types.cpp
+  )
+target_link_libraries(coconut-client
+  thrift
+  )
