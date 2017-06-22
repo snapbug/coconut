@@ -14,7 +14,6 @@ add_definitions(-mavx -march=native)
 # findpackage(blaze) does not work
 include("${CMAKE_CURRENT_LIST_DIR}/external/blaze/build/cmake/blaze-targets.cmake")
 find_package(avro REQUIRED)
-find_package(Boost COMPONENTS system REQUIRED)
 
 #
 # This target doesn't do anything, but anything that depends on this will always be rebuilt.
