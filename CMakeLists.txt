@@ -45,7 +45,7 @@ add_custom_command(
   )
 add_custom_command(
   OUTPUT gen-cpp/QuestionAnswering.h
-  COMMAND thrift -r --gen cpp ../qa.thrift
+  COMMAND thrift -r --gen cpp "${CMAKE_CURRENT_LIST_DIR}/qa.thrift"
   always_rebuild
   )
 
