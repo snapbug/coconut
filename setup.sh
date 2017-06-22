@@ -12,10 +12,9 @@ cmake .. -DBLAZE_SMP_THREADS=C++11
 cd ../../..
 
 # Generate the thrift files
+thrift -r --gen cpp qa.thrift
 mkdir build
-cd build
-thrift -r --gen cpp ../qa.thrift
-cd ..
+ln -s gen-cpp build/gen-cpp
 
 # Generate the header file
 avrogencpp -i weights.avsc -o nnweights.hxx -n coconut

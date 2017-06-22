@@ -43,11 +43,6 @@ add_custom_command(
   COMMAND coconut-gen "${CMAKE_CURRENT_LIST_DIR}/weights.avro"
   always_rebuild
   )
-add_custom_command(
-  OUTPUT gen-cpp/QuestionAnswering.h
-  COMMAND thrift -r --gen cpp "${CMAKE_CURRENT_LIST_DIR}/qa.thrift"
-  always_rebuild
-  )
 
 add_executable(coconut-server
   coconut-server.cpp
