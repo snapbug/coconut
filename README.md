@@ -5,7 +5,6 @@ Should just work.
 
 ```
 ./setup.sh
-mkdir build
 cd build
 cmake ..
 make
