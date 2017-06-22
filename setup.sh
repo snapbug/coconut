@@ -9,9 +9,11 @@ cd external/blaze
 mkdir build
 cd build
 cmake .. -DBLAZE_SMP_THREADS=C++11
-cd ../..
+cd ../../..
 
 # Generate the thrift files
+mkdir build
+cd build
 thrift -r --gen cpp ../qa.thrift
 cd ..
 
