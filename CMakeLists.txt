@@ -32,7 +32,6 @@ add_executable(coconut-gen
   )
 target_link_libraries(coconut-gen
   avrocpp
-  Boost::system
   )
 
 #

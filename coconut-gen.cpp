@@ -2,27 +2,11 @@
 #include "avro/DataFile.hh"
 #include "avro/Decoder.hh"
 #include "nnweights.hxx"
-#include <boost/tokenizer.hpp>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <tuple>
-
-std::vector<std::vector<double>> readCSV(const char *fname) {
-	using namespace boost;
-	std::ifstream inp(fname);
-	std::vector<std::vector<double>> mtx;
-	std::string line;
-
-	while (getline(inp, line)) {
-		std::vector<double> dblline;
-		for (auto &i : tokenizer<escaped_list_separator<char>>(line))
-			dblline.push_back(std::stod(i));
-		mtx.push_back(dblline);
-	}
-	return mtx;
-}
 
 int main(int argc, char **argv) {
 	std::ofstream coconut("coconut-server.cpp");
