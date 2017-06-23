@@ -162,22 +162,53 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
         this->w2v_map = loadWord2Vec(w2v);
 	}
 
-	double getScore(const std::string &question, const std::string &answer) {
-        std::cout << "Question: '" << question << "'\n";
-        std::cout << "Answer: '" << answer << "'\n";
-
+    void getScores(std::vector<double> &_results, const std::string &question, const std::vector<std::string> &answers) {
+        _results.reserve(answers.size());
         auto start = std::chrono::steady_clock::now();
 )";
 
-	for (auto part : {"question", "answer"}) {
+	for (auto part : {"question"}) {
 		/* Load the query terms into a vector */
 		coconut << "std::stringstream " << part << "_ss{" << part << "};\n";
 		coconut << "std::vector<std::string> " << part << "_words{std::istream_iterator<std::string>{" << part << "_ss}, std::istream_iterator<std::string>{}};\n";
-        coconut << "if (" << part << "_words.size() == 0) { return -1; }\n";
+        coconut << "if (" << part << "_words.size() == 0) { return ; }\n";
+        /* Prepare the input matrices for forwarding */
+		coconut << "\n";
+		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
+		/* Set the relevant columns in the matrix to be the word2vec values, or if we can't find it, a random vector */
+		coconut << "for (int i = 0; i < " << part << "_words.size(); i++) {\n";
+		coconut << "  auto w2v_p = this->w2v_map.find(" << part << "_words[i]);\n";
+		coconut << "  auto w2v = w2v_p == this->w2v_map.end() ? this->unknown_word : w2v_p->second;\n";
+		coconut << "  submatrix(" << part << "_input, 0, i + COLUMN_PADDING, EMBED_DIMENSION, 1) = w2v;\n";
+		coconut << "}\n";
+		/* Right pad */
+		coconut << "submatrix(this->" << part << "_input, 0, " << part << "_words.size() + COLUMN_PADDING, EMBED_DIMENSION, COLUMN_PADDING) = 0;\n";
+		/* Reshape it to match the number of terms given */
+		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, " << part << "_words.size() + 2 * COLUMN_PADDING);\n";
+		/* Perform the convolutions */
+		coconut << "this->conv_result.resize(" << part << "_words.size());\n";
+		coconut << "for (int i = 0; i < this->" << part << "_convolution_filters.size(); i++) {\n";
+		coconut << "  for (int k = 0; k < " << part << "_words.size(); k++) {\n";
+		coconut << "    auto sub = submatrix(this->" << part << "_input, 0, k + COLUMN_PADDING, this->" << part << "_convolution_filters[i].rows(), this->" << part << "_convolution_filters[i].columns());\n";
+		coconut << "    auto cc = sub % this->" << part << "_convolution_filters[i];\n";
+		coconut << "    float sum = 0.0;\n";
+		coconut << "    for (int j = 0; j < cc.rows(); j++) {\n";
+		coconut << "      sum += std::accumulate(cc.begin(j), cc.end(j), 0.0);\n";
+		coconut << "    }\n";
+		coconut << "  this->conv_result[k] = sum;\n";
+		coconut << "  }\n";
+		coconut << "  this->" << part << "_conv_map[i] = max(this->conv_result);\n";
+		coconut << "}\n";
+		coconut << "this->" << part << "_conv_map = tanh(this->" << part << "_conv_map + this->" << part << "_convolution_biases);\n";
 	}
-
-	/* Prepare the input matrices for forwarding */
-	for (auto part : {"question", "answer"}) {
+    
+    coconut << "for (const auto &answer : answers) {\n";
+	for (auto part : {"answer"}) {
+		/* Load the query terms into a vector */
+		coconut << "std::stringstream " << part << "_ss{" << part << "};\n";
+		coconut << "std::vector<std::string> " << part << "_words{std::istream_iterator<std::string>{" << part << "_ss}, std::istream_iterator<std::string>{}};\n";
+        coconut << "if (" << part << "_words.size() == 0) { break; }\n";
+        /* Prepare the input matrices for forwarding */
 		coconut << "\n";
 		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
 		/* Set the relevant columns in the matrix to be the word2vec values, or if we can't find it,
@@ -191,10 +222,6 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 		coconut << "submatrix(this->" << part << "_input, 0, " << part << "_words.size() + COLUMN_PADDING, EMBED_DIMENSION, COLUMN_PADDING) = 0;\n";
 		/* Reshape it to match the number of terms given */
 		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, " << part << "_words.size() + 2 * COLUMN_PADDING);\n";
-	}
-
-	/* Start the forwarding */
-	for (auto part : {"question", "answer"}) {
 		/* Perform the convolutions */
 		coconut << "this->conv_result.resize(" << part << "_words.size());\n";
 		coconut << "for (int i = 0; i < this->" << part << "_convolution_filters.size(); i++) {\n";
@@ -224,12 +251,17 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
         auto expsubmax = exp(submax);
         auto sumexpsubmax = expsubmax[0] + expsubmax[1];
 
-        auto end = std::chrono::steady_clock::now();
-        std::chrono::duration<double, std::milli> time = end - start;
-
-        std::cout << "Time: " << time.count() << "ms\n";
-        return submax[1] - log(sumexpsubmax);
+        _results.push_back(submax[1] - log(sumexpsubmax));
+        }
+    auto end = std::chrono::steady_clock::now();
+    std::chrono::duration<double, std::milli> time = end - start;
 	}
+
+	double getScore(const std::string &question, const std::string &answer) {
+        std::vector<double> results(1);
+        getScores(results, question, {answer});
+        return results[0];
+    }
 };
 
 int main(int argc, char **argv) {
