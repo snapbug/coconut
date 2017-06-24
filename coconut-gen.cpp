@@ -13,23 +13,14 @@ int main(int argc, char **argv) {
 
 	coconut << R"(
 #include "blaze/Math.h"
-#include "gen-cpp/QuestionAnswering.h"
 #include <array>
 #include <chrono>
 #include <fstream>
 #include <iostream>
-#include <thrift/protocol/TBinaryProtocol.h>
-#include <thrift/server/TSimpleServer.h>
-#include <thrift/transport/TBufferTransports.h>
-#include <thrift/transport/TServerSocket.h>
 #include <unordered_map>
 #include <vector>
 
 using namespace blaze;
-using namespace ::apache::thrift;
-using namespace ::apache::thrift::protocol;
-using namespace ::apache::thrift::transport;
-using namespace ::apache::thrift::server;
 
 static constexpr unsigned long COLUMN_PADDING = 4;
 static constexpr unsigned long MAX_SENTENCE_LENGTH = 60;
@@ -70,8 +61,7 @@ auto loadWord2Vec(const char *fname) {
   return w2vmap;
 }
 
-class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
-  public:
+int main(int argc, char **argv) {
 )";
 
 	std::vector<std::string> names{"question_convolution_filters", "question_convolution_biases",
@@ -93,6 +83,9 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 			        << weight.dimension[2] << ">, " << weight.dimension[0] << "> " << name << "{\n";
 			sz = weight.dimension[1] * weight.dimension[2];
 			for (int n = 0; n < weight.dimension[0]; n++) {
+              if (n != 0) {
+                coconut << ",";
+              }
 				coconut << "StaticMatrix<float, " << weight.dimension[1] << ", "
 				        << weight.dimension[2] << ">{";
 				auto start = n * sz;
@@ -103,7 +96,7 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 						coconut << "}, {";
 					coconut << weight.weights[w] << ", ";
 				}
-				coconut << "}},\n";
+				coconut << "}}\n";
 			}
 			coconut << "};\n";
 			break;
@@ -114,18 +107,23 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 			for (int x = 0; x < weight.dimension[0]; x++) {
 				auto start = x * sz;
 				auto end = (x + 1) * sz;
+                if (x != 0) { coconut << ","; }
 				coconut << "{";
-				for (int w = start; w < end; w++)
-					coconut << weight.weights[w] << ", ";
-				coconut << "},";
+				for (int w = start; w < end; w++) {
+                  if (w != start) { coconut << ","; }
+					coconut << weight.weights[w];
+                }
+				coconut << "}";
 			}
 			coconut << "};\n";
 			break;
 		case 1:
 			coconut << "StaticVector<float, " << weight.dimension[0] << ", rowVector> " << name
 			        << "{";
-			for (auto w : weight.weights)
-				coconut << w << ", ";
+			for (int i = 0; i < weight.weights.size(); i++) {
+              if (i != 0) { coconut << ","; }
+				coconut << weight.weights[i];
+            }
 			coconut << "};\n";
 			break;
 		}
@@ -136,8 +134,10 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 	gen.seed(1234);
 	std::uniform_real_distribution<float> dist(-.25, .25);
 	coconut << "StaticMatrix<float, EMBED_DIMENSION, 1> unknown_word{";
-	for (int i = 0; i < 50; i++)
-		coconut << "{" << dist(gen) << "},";
+	for (int i = 0; i < 50; i++) {
+      if (i != 0) { coconut << ","; }
+		coconut << "{" << dist(gen) << "}";
+    }
 	coconut << "};\n";
 
 	for (auto part : {"question", "answer"}) {
@@ -152,97 +152,91 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 	           "conv_result{MAX_SENTENCE_LENGTH};\n";
 
 	coconut << R"(
-    decltype(loadWord2Vec("")) w2v_map;
+    auto w2v_map = loadWord2Vec(argv[1]);
 
-	QuestionAnsweringHandler(const char *w2v) {
-		transpose(this->hidden_layer_weights);
+		transpose(hidden_layer_weights);
         /* Left pad */
-        submatrix(this->question_input, 0, 0, EMBED_DIMENSION, COLUMN_PADDING) = 0;
-        submatrix(this->answer_input, 0, 0, EMBED_DIMENSION, COLUMN_PADDING) = 0;
-        this->w2v_map = loadWord2Vec(w2v);
-	}
+        submatrix(question_input, 0, 0, EMBED_DIMENSION, COLUMN_PADDING) = 0;
+        submatrix(answer_input, 0, 0, EMBED_DIMENSION, COLUMN_PADDING) = 0;
 
-	double getScore(const std::string &question, const std::string &answer) {
-        std::cout << "Question: '" << question << "'\n";
-        std::cout << "Answer: '" << answer << "'\n";
+        std::fstream question_file{argv[2]};
+        std::fstream answer_file{argv[3]};
+
+        std::string question;
+        std::string answer;
 
         auto start = std::chrono::steady_clock::now();
+int pairs = 0;
+
+  while (true) {
+      getline(question_file, question);
+      getline(answer_file, answer);
+
+if (answer == "" || question == "") { break; }
+pairs++;
+
 )";
 
 	for (auto part : {"question", "answer"}) {
 		/* Load the query terms into a vector */
 		coconut << "std::stringstream " << part << "_ss{" << part << "};\n";
 		coconut << "std::vector<std::string> " << part << "_words{std::istream_iterator<std::string>{" << part << "_ss}, std::istream_iterator<std::string>{}};\n";
-        coconut << "if (" << part << "_words.size() == 0) { return -1; }\n";
 	}
 
 	/* Prepare the input matrices for forwarding */
 	for (auto part : {"question", "answer"}) {
 		coconut << "\n";
-		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
+		coconut << "" << part << "_input.resize(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
 		/* Set the relevant columns in the matrix to be the word2vec values, or if we can't find it,
 		 * a random vector */
 		coconut << "for (int i = 0; i < " << part << "_words.size(); i++) {\n";
-		coconut << "  auto w2v_p = this->w2v_map.find(" << part << "_words[i]);\n";
-		coconut << "  auto w2v = w2v_p == this->w2v_map.end() ? this->unknown_word : w2v_p->second;\n";
+		coconut << "  auto w2v_p = w2v_map.find(" << part << "_words[i]);\n";
+		coconut << "  auto w2v = w2v_p == w2v_map.end() ? unknown_word : w2v_p->second;\n";
 		coconut << "  submatrix(" << part << "_input, 0, i + COLUMN_PADDING, EMBED_DIMENSION, 1) = w2v;\n";
 		coconut << "}\n";
 		/* Right pad */
-		coconut << "submatrix(this->" << part << "_input, 0, " << part << "_words.size() + COLUMN_PADDING, EMBED_DIMENSION, COLUMN_PADDING) = 0;\n";
+		coconut << "submatrix(" << part << "_input, 0, " << part << "_words.size() + COLUMN_PADDING, EMBED_DIMENSION, COLUMN_PADDING) = 0;\n";
 		/* Reshape it to match the number of terms given */
-		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, " << part << "_words.size() + 2 * COLUMN_PADDING);\n";
+		coconut << "" << part << "_input.resize(EMBED_DIMENSION, " << part << "_words.size() + 2 * COLUMN_PADDING);\n";
 	}
 
 	/* Start the forwarding */
 	for (auto part : {"question", "answer"}) {
 		/* Perform the convolutions */
-		coconut << "this->conv_result.resize(" << part << "_words.size());\n";
-		coconut << "for (int i = 0; i < this->" << part << "_convolution_filters.size(); i++) {\n";
+		coconut << "conv_result.resize(" << part << "_words.size());\n";
+		coconut << "for (int i = 0; i < " << part << "_convolution_filters.size(); i++) {\n";
 		coconut << "  for (int k = 0; k < " << part << "_words.size(); k++) {\n";
-		coconut << "    auto sub = submatrix(this->" << part << "_input, 0, k + COLUMN_PADDING, this->" << part << "_convolution_filters[i].rows(), this->" << part << "_convolution_filters[i].columns());\n";
-		coconut << "    auto cc = sub % this->" << part << "_convolution_filters[i];\n";
+		coconut << "    auto sub = submatrix(" << part << "_input, 0, k + COLUMN_PADDING, " << part << "_convolution_filters[i].rows(), " << part << "_convolution_filters[i].columns());\n";
+		coconut << "    auto cc = sub % " << part << "_convolution_filters[i];\n";
 		coconut << "    float sum = 0.0;\n";
 		coconut << "    for (int j = 0; j < cc.rows(); j++) {\n";
 		coconut << "      sum += std::accumulate(cc.begin(j), cc.end(j), 0.0);\n";
 		coconut << "    }\n";
-		coconut << "  this->conv_result[k] = sum;\n";
+		coconut << "  conv_result[k] = sum;\n";
 		coconut << "  }\n";
-		coconut << "  this->" << part << "_conv_map[i] = max(this->conv_result);\n";
+		coconut << "  " << part << "_conv_map[i] = max(conv_result);\n";
 		coconut << "}\n";
-		coconut << "this->" << part << "_conv_map = tanh(this->" << part << "_conv_map + this->" << part << "_convolution_biases);\n";
+		coconut << "" << part << "_conv_map = tanh(" << part << "_conv_map + " << part << "_convolution_biases);\n";
 	}
 	coconut << R"(
         StaticVector<float, 204, rowVector> joinLayer{0};
-        subvector(joinLayer, 0, this->question_conv_map.size()) = this->question_conv_map;
-        subvector(joinLayer, this->question_conv_map.size(), this->answer_conv_map.size()) = this->answer_conv_map;
+        subvector(joinLayer, 0, question_conv_map.size()) = question_conv_map;
+        subvector(joinLayer, question_conv_map.size(), answer_conv_map.size()) = answer_conv_map;
 
-        auto HiddenLayer = tanh((joinLayer * this->hidden_layer_weights) + this->hidden_layer_biases) * 2;
-        auto FinalLayer = (HiddenLayer * trans(softmax_layer_weights)) + this->softmax_layer_biases;
+        auto HiddenLayer = tanh((joinLayer * hidden_layer_weights) + hidden_layer_biases) * 2;
+        auto FinalLayer = (HiddenLayer * trans(softmax_layer_weights)) + softmax_layer_biases;
 
         StaticVector<float, 2, rowVector> fmax(max(FinalLayer));
         auto submax = FinalLayer - fmax;
         auto expsubmax = exp(submax);
         auto sumexpsubmax = expsubmax[0] + expsubmax[1];
 
+        /* std::cout << submax[1] - log(sumexpsubmax) << " in " << time.count() << "ms\n"; */
+	}
         auto end = std::chrono::steady_clock::now();
         std::chrono::duration<double, std::milli> time = end - start;
 
-        std::cout << "Time: " << time.count() << "ms\n";
-        return submax[1] - log(sumexpsubmax);
-	}
-};
-
-int main(int argc, char **argv) {
-  int port = 9090;
-  boost::shared_ptr<QuestionAnsweringHandler> handler(new QuestionAnsweringHandler(argv[1]));
-  boost::shared_ptr<TProcessor> processor(new QuestionAnsweringProcessor(handler));
-  boost::shared_ptr<TServerTransport> serverTransport(new TServerSocket(port));
-  boost::shared_ptr<TTransportFactory> transportFactory(new TBufferedTransportFactory());
-  boost::shared_ptr<TProtocolFactory> protocolFactory(new TBinaryProtocolFactory());
-
-  TSimpleServer server(processor, serverTransport, transportFactory, protocolFactory);
-  std::cerr << "Serving!" << std::endl;
-  server.serve();
+std::cout << pairs << " pairs in " << time.count() << "ms or " << (1000. * (pairs / time.count())) << " qps\n";
 }
 )";
 
