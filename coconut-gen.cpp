@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
 		case 3:
 			std::cerr << name << " has size " << weight.dimension[0] << std::endl;
 			coconut << "std::array<StaticMatrix<float, " << weight.dimension[1] << ", "
-			        << weight.dimension[2] << ">, " << weight.dimension[0] << "> " << name << "{\n";
+			        << weight.dimension[2] << ">, " << weight.dimension[0] << "> " << name << "{{\n";
 			sz = weight.dimension[1] * weight.dimension[2];
 			for (int n = 0; n < weight.dimension[0]; n++) {
               if (n != 0) {
@@ -101,7 +101,7 @@ int main(int argc, char **argv) {
 				}
 				coconut << "}}\n";
 			}
-			coconut << "};\n";
+			coconut << "}};\n";
 			break;
 		case 2:
 			coconut << "StaticMatrix<float, " << weight.dimension[0] << ", " << weight.dimension[1]
