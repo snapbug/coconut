@@ -7,6 +7,8 @@
 #include <iostream>
 #include <random>
 #include <tuple>
+#include <string>
+#include <vector>
 
 int main(int argc, char **argv) {
 	std::ofstream coconut("coconut-server.cpp");
@@ -17,6 +19,7 @@ int main(int argc, char **argv) {
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
