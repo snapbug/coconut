@@ -93,6 +93,9 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 			        << weight.dimension[2] << ">, " << weight.dimension[0] << "> " << name << "{\n";
 			sz = weight.dimension[1] * weight.dimension[2];
 			for (int n = 0; n < weight.dimension[0]; n++) {
+				if (n != 0) {
+					coconut << ",";
+				}
 				coconut << "StaticMatrix<float, " << weight.dimension[1] << ", "
 				        << weight.dimension[2] << ">{";
 				auto start = n * sz;
@@ -103,7 +106,7 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 						coconut << "}, {";
 					coconut << weight.weights[w] << ", ";
 				}
-				coconut << "}},\n";
+				coconut << "}}\n";
 			}
 			coconut << "};\n";
 			break;
@@ -114,18 +117,29 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 			for (int x = 0; x < weight.dimension[0]; x++) {
 				auto start = x * sz;
 				auto end = (x + 1) * sz;
+				if (x != 0) {
+					coconut << ",";
+				}
 				coconut << "{";
-				for (int w = start; w < end; w++)
-					coconut << weight.weights[w] << ", ";
-				coconut << "},";
+				for (int w = start; w < end; w++) {
+					if (w != start) {
+						coconut << ",";
+					}
+					coconut << weight.weights[w] << "";
+				}
+				coconut << "}";
 			}
 			coconut << "};\n";
 			break;
 		case 1:
 			coconut << "StaticVector<float, " << weight.dimension[0] << ", rowVector> " << name
 			        << "{";
-			for (auto w : weight.weights)
-				coconut << w << ", ";
+			for (int i = 0; i < weight.weights.size(); i++) {
+				if (i != 0) {
+					coconut << ",";
+				}
+				coconut << weight.weights[i];
+			}
 			coconut << "};\n";
 			break;
 		}
@@ -172,25 +186,32 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 	for (auto part : {"question", "answer"}) {
 		/* Load the query terms into a vector */
 		coconut << "std::stringstream " << part << "_ss{" << part << "};\n";
-		coconut << "std::vector<std::string> " << part << "_words{std::istream_iterator<std::string>{" << part << "_ss}, std::istream_iterator<std::string>{}};\n";
-        coconut << "if (" << part << "_words.size() == 0) { return -1; }\n";
+		coconut << "std::vector<std::string> " << part
+		        << "_words{std::istream_iterator<std::string>{" << part
+		        << "_ss}, std::istream_iterator<std::string>{}};\n";
+		coconut << "if (" << part << "_words.size() == 0) { return -1; }\n";
 	}
 
 	/* Prepare the input matrices for forwarding */
 	for (auto part : {"question", "answer"}) {
 		coconut << "\n";
-		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
+		coconut << "this->" << part
+		        << "_input.resize(EMBED_DIMENSION, MAX_SENTENCE_LENGTH + COLUMN_PADDING * 2);\n";
 		/* Set the relevant columns in the matrix to be the word2vec values, or if we can't find it,
 		 * a random vector */
 		coconut << "for (int i = 0; i < " << part << "_words.size(); i++) {\n";
 		coconut << "  auto w2v_p = this->w2v_map.find(" << part << "_words[i]);\n";
-		coconut << "  auto w2v = w2v_p == this->w2v_map.end() ? this->unknown_word : w2v_p->second;\n";
-		coconut << "  submatrix(" << part << "_input, 0, i + COLUMN_PADDING, EMBED_DIMENSION, 1) = w2v;\n";
+		coconut
+		    << "  auto w2v = w2v_p == this->w2v_map.end() ? this->unknown_word : w2v_p->second;\n";
+		coconut << "  submatrix(" << part
+		        << "_input, 0, i + COLUMN_PADDING, EMBED_DIMENSION, 1) = w2v;\n";
 		coconut << "}\n";
 		/* Right pad */
-		coconut << "submatrix(this->" << part << "_input, 0, " << part << "_words.size() + COLUMN_PADDING, EMBED_DIMENSION, COLUMN_PADDING) = 0;\n";
+		coconut << "submatrix(this->" << part << "_input, 0, " << part
+		        << "_words.size() + COLUMN_PADDING, EMBED_DIMENSION, COLUMN_PADDING) = 0;\n";
 		/* Reshape it to match the number of terms given */
-		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, " << part << "_words.size() + 2 * COLUMN_PADDING);\n";
+		coconut << "this->" << part << "_input.resize(EMBED_DIMENSION, " << part
+		        << "_words.size() + 2 * COLUMN_PADDING);\n";
 	}
 
 	/* Start the forwarding */
@@ -199,7 +220,10 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 		coconut << "this->conv_result.resize(" << part << "_words.size());\n";
 		coconut << "for (int i = 0; i < this->" << part << "_convolution_filters.size(); i++) {\n";
 		coconut << "  for (int k = 0; k < " << part << "_words.size(); k++) {\n";
-		coconut << "    auto sub = submatrix(this->" << part << "_input, 0, k + COLUMN_PADDING, this->" << part << "_convolution_filters[i].rows(), this->" << part << "_convolution_filters[i].columns());\n";
+		coconut << "    auto sub = submatrix(this->" << part
+		        << "_input, 0, k + COLUMN_PADDING, this->" << part
+		        << "_convolution_filters[i].rows(), this->" << part
+		        << "_convolution_filters[i].columns());\n";
 		coconut << "    auto cc = sub % this->" << part << "_convolution_filters[i];\n";
 		coconut << "    float sum = 0.0;\n";
 		coconut << "    for (int j = 0; j < cc.rows(); j++) {\n";
@@ -209,7 +233,8 @@ class QuestionAnsweringHandler : virtual public QuestionAnsweringIf {
 		coconut << "  }\n";
 		coconut << "  this->" << part << "_conv_map[i] = max(this->conv_result);\n";
 		coconut << "}\n";
-		coconut << "this->" << part << "_conv_map = tanh(this->" << part << "_conv_map + this->" << part << "_convolution_biases);\n";
+		coconut << "this->" << part << "_conv_map = tanh(this->" << part << "_conv_map + this->"
+		        << part << "_convolution_biases);\n";
 	}
 	coconut << R"(
         StaticVector<float, 204, rowVector> joinLayer{0};
