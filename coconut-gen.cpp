@@ -2,11 +2,13 @@
 #include "avro/DataFile.hh"
 #include "avro/Decoder.hh"
 #include "nnweights.hxx"
+#include <string>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <tuple>
+#include <vector>
 
 int main(int argc, char **argv) {
 	std::ofstream coconut("coconut-server.cpp");
@@ -18,6 +20,7 @@ int main(int argc, char **argv) {
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <string>
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/server/TSimpleServer.h>
 #include <thrift/transport/TBufferTransports.h>
