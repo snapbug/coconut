@@ -12,6 +12,8 @@ project(coconut)
 include("${CMAKE_CURRENT_LIST_DIR}/external/blaze/build/cmake/blaze-targets.cmake")
 find_package(avro REQUIRED)
 
+add_definitions("-march=native -mavx2")
+
 #
 # This target doesn't do anything, but anything that depends on this will always be rebuilt.
 #

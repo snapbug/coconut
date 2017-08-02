@@ -28,14 +28,21 @@ using namespace blaze;
 static constexpr unsigned long COLUMN_PADDING = 4;
 static constexpr unsigned long MAX_SENTENCE_LENGTH = 60;
 static constexpr unsigned long EMBED_DIMENSION = 50;
+static constexpr unsigned long VOCAB_DIMENSION = 2470719;
+
+StaticMatrix<float, EMBED_DIMENSION, VOCAB_DIMENSION> w2v_mtx;
 
 auto loadWord2Vec(const char *fname) {
-  using ValueType = StaticMatrix<float, EMBED_DIMENSION, 1>;
   std::ifstream w2v(fname, std::ios::binary);
-  std::unordered_map<std::string, ValueType> w2vmap;
+  std::unordered_map<std::string, int> w2vmap;
   long long vocab, layer;
 
   w2v >> vocab >> layer;
+  if (vocab > VOCAB_DIMENSION) {
+    std::cerr << "Number of vocab terms (" << vocab << ") is larger than allowed (" << VOCAB_DIMENSION << ")\n";
+    std::cerr << "Only reading the first " << VOCAB_DIMENSION << " terms\n";
+    vocab = VOCAB_DIMENSION;
+  }
   if (layer > EMBED_DIMENSION) {
     std::cerr << "Embedding size (" << layer << ") is larger than allowed (" << EMBED_DIMENSION << ")\n";
     std::terminate();
@@ -43,19 +50,17 @@ auto loadWord2Vec(const char *fname) {
   std::cerr << "Loading " << EMBED_DIMENSION << "-dimensional embeddings for " << vocab << " terms: ";
 
   auto start = std::chrono::steady_clock::now();
-  for (long long i = 0; i < vocab; i++) {
+  for (int i = 0; i < vocab; i++) {
     std::string word;
-    std::vector<float> vec;
-    vec.reserve(layer);
 
     w2v >> word;
     w2v.get(); // skip over space after word
     for (int j = 0; j < layer; j++) {
       float x;
       w2v.read((char *)&x, sizeof(x));
-      vec.push_back(x);
+      w2v_mtx(j, i) = x;
     }
-    w2vmap[word] = ValueType(EMBED_DIMENSION, 1, vec.data());
+    w2vmap[word] = i;
   }
   auto end = std::chrono::steady_clock::now();
 
@@ -168,9 +173,10 @@ int main(int argc, char **argv) {
         std::string question;
         std::string answer;
 
-        auto start = std::chrono::steady_clock::now();
-int pairs = 0;
+        StaticVector<float, 204, rowVector> joinLayer{0};
+	int pairs = 0;
 
+        auto start = std::chrono::steady_clock::now();
   while (true) {
       getline(question_file, question);
       getline(answer_file, answer);
@@ -194,7 +200,7 @@ pairs++;
 		 * a random vector */
 		coconut << "for (int i = 0; i < " << part << "_words.size(); i++) {\n";
 		coconut << "  auto w2v_p = w2v_map.find(" << part << "_words[i]);\n";
-		coconut << "  auto w2v = w2v_p == w2v_map.end() ? unknown_word : w2v_p->second;\n";
+                coconut << "  auto w2v = w2v_p == w2v_map.end() ? unknown_word : submatrix(w2v_mtx, 0, w2v_p->second, EMBED_DIMENSION, 1);\n";
 		coconut << "  submatrix(" << part << "_input, 0, i + COLUMN_PADDING, EMBED_DIMENSION, 1) = w2v;\n";
 		coconut << "}\n";
 		/* Right pad */
@@ -222,7 +228,6 @@ pairs++;
 		coconut << "" << part << "_conv_map = tanh(" << part << "_conv_map + " << part << "_convolution_biases);\n";
 	}
 	coconut << R"(
-        StaticVector<float, 204, rowVector> joinLayer{0};
         subvector(joinLayer, 0, question_conv_map.size()) = question_conv_map;
         subvector(joinLayer, question_conv_map.size(), answer_conv_map.size()) = answer_conv_map;
 
